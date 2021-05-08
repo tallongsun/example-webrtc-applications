@@ -160,12 +160,14 @@ func signalPeerConnections() {
 				return true
 			}
 
+			gatherComplete := webrtc.GatheringCompletePromise(peerConnections[i].peerConnection)
 			if err = peerConnections[i].peerConnection.SetLocalDescription(offer); err != nil {
 				return true
 			}
+			<-gatherComplete
 
 
-			offerString, err := json.Marshal(offer)
+			offerString, err := json.Marshal(peerConnections[i].peerConnection.LocalDescription())
 			if err != nil {
 				return true
 			}
@@ -274,12 +276,12 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if writeErr := c.WriteJSON(&websocketMessage{
-			Event: "candidate",
-			Data:  string(candidateString),
-		}); writeErr != nil {
-			log.Println(writeErr)
-		}
+		//if writeErr := c.WriteJSON(&websocketMessage{
+		//	Event: "candidate",
+		//	Data:  string(candidateString),
+		//}); writeErr != nil {
+		//	log.Println(writeErr)
+		//}
 		fmt.Println("to browser",string(candidateString))
 	})
 
