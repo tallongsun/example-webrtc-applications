@@ -50,8 +50,8 @@
         if (!e.candidate) {
           return
         }
-
-        ws.send(JSON.stringify({event: 'candidate', data: JSON.stringify(e.candidate)}))
+        console.log("to server"+JSON.stringify(e.candidate))
+        // ws.send(JSON.stringify({event: 'candidate', data: JSON.stringify(e.candidate)}))
       }
 
       ws.onclose = function(evt) {
@@ -84,6 +84,7 @@
             }
 
             pc.addIceCandidate(candidate)
+            console.log("from server"+msg.data)
         }
       }
 

@@ -1,0 +1,83 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>pion-test</title>
+  </head>
+
+  <body>
+    <button onclick="window.publishVideo()"> Publish Video </button>
+    <br />
+
+    <h3> Video Stream </h3>
+    <video id="localVideo" autoplay="true" controls="true"></video> <br />
+
+    <h3> Remote Video </h3>
+    <div id="remoteVideos"></div> <br />
+
+    <h3> Logs </h3>
+    <div id="logs"></div>
+  </body>
+
+  <script>
+    var log = msg => {
+      document.getElementById('logs').innerHTML += msg + '<br>'
+    }
+
+    window.publishVideo = () => {
+      navigator.mediaDevices.getUserMedia({video: true, audio: true })
+        .then(stream => {
+          let pc = new RTCPeerConnection()
+
+          pc.onicecandidate = (event) => {
+            console.log("onicecandidate",event)
+          };
+
+          pc.ontrack = function (event) {
+            console.log(event.track.id,event.streams[0].id,event.track.kind)
+            if (event.track.kind === 'audio') {
+              return
+            }
+            let el = document.createElement(event.track.kind)
+            el.srcObject = event.streams[0]
+            el.autoplay = true
+            el.controls = true
+            document.getElementById('remoteVideos').appendChild(el)
+
+            event.track.onmute = function(event) {
+              el.play()
+            }
+
+            event.streams[0].onremovetrack = ({track}) => {
+              if (el.parentNode) {
+                el.parentNode.removeChild(el)
+              }
+            }
+
+          }
+
+          document.getElementById('localVideo').srcObject = stream
+          stream.getTracks().forEach(function(track) {
+            pc.addTrack(track, stream)
+          })
+
+          pc.createOffer()
+            .then(offer => {
+              pc.setLocalDescription(offer)
+              console.log("offer")
+
+              return fetch(`/signal`, {
+                method: 'post',
+                headers: {
+                  'Accept': 'application/json, text/plain, */*',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(offer)
+              })
+            })
+            .then(res => res.json())
+            .then(res => {pc.setRemoteDescription(res);console.log("anwser");})
+            .catch(log)
+        }).catch(log)
+    }
+  </script>
+</html>

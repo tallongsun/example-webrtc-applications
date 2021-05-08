@@ -1,0 +1,97 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>pion-test</title>
+  </head>
+
+  <body>
+    <button onclick="window.publishVideo()"> Publish Video </button>
+    <br />
+
+    <h3> Video Stream </h3>
+    <video id="localVideo"  width="200" height="200" autoplay muted></video> <br />
+
+    <h3> Remote Video </h3>
+    <div id="remoteVideos"></div> <br />
+
+    <h3> Logs </h3>
+    <div id="logs"></div>
+  </body>
+
+  <script>
+    var log = msg => {
+      document.getElementById('logs').innerHTML += msg + '<br>'
+    }
+
+    window.publishVideo = () => {
+      navigator.mediaDevices.getUserMedia({video: {
+          width: {
+            ideal: 4096,
+          },
+          height: {
+            ideal: 2160,
+          },
+          frameRate: {
+            ideal: 60,
+            min: 10,
+          },
+        }, audio: false })
+        .then(stream => {
+          let pc = new RTCPeerConnection()
+
+          pc.ontrack = function (event) {
+            console.log(event.track.id,event.streams[0].id,event.track.kind)
+            if (event.track.kind === 'audio') {
+              return
+            }
+            let el = document.createElement(event.track.kind)
+            el.srcObject = event.streams[0]
+            el.autoplay = true
+            el.width = "500";
+            document.getElementById('remoteVideos').appendChild(el)
+
+          }
+
+          document.getElementById('localVideo').srcObject = stream
+          pc.addTransceiver(stream.getVideoTracks()[0], {
+            direction: "sendonly",
+            streams: [stream],
+            sendEncodings: [
+              // for firefox order matters... first high resolution, then scaled resolutions...
+              {
+                rid: "f",
+              },
+              {
+                rid: "h",
+                scaleResolutionDownBy: 2.0,
+              },
+              {
+                rid: "q",
+                scaleResolutionDownBy: 4.0,
+              },
+            ],
+          });
+          pc.addTransceiver("video");
+          pc.addTransceiver("video");
+          pc.addTransceiver("video");
+
+          pc.createOffer()
+            .then(offer => {
+              pc.setLocalDescription(offer)
+
+              return fetch(`/signal`, {
+                method: 'post',
+                headers: {
+                  'Accept': 'application/json, text/plain, */*',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(offer)
+              })
+            })
+            .then(res => res.json())
+            .then(res => pc.setRemoteDescription(res))
+            .catch(log)
+        }).catch(log)
+    }
+  </script>
+</html>

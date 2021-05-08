@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -163,6 +164,7 @@ func signalPeerConnections() {
 				return true
 			}
 
+
 			offerString, err := json.Marshal(offer)
 			if err != nil {
 				return true
@@ -230,7 +232,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	defer c.Close() //nolint
 
 	// Create new PeerConnection
-	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{
+		//ICEServers: []webrtc.ICEServer{
+		//	{
+		//		URLs: []string{"stun:stun.l.google.com:19302"},
+		//	},
+		//},
+	})
 	if err != nil {
 		log.Print(err)
 		return
@@ -272,6 +280,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 		}); writeErr != nil {
 			log.Println(writeErr)
 		}
+		fmt.Println("to browser",string(candidateString))
 	})
 
 	// If PeerConnection is closed remove it from global list
@@ -287,6 +296,7 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 	})
 
 	peerConnection.OnTrack(func(t *webrtc.TrackRemote, _ *webrtc.RTPReceiver) {
+		fmt.Println(t.ID(),t.StreamID(),t.Kind(),t.RID())
 		// Create a track to fan out our incoming video to all peers
 		trackLocal := addTrack(t)
 		defer removeTrack(trackLocal)
@@ -330,13 +340,13 @@ func websocketHandler(w http.ResponseWriter, r *http.Request) {
 				log.Println(err)
 				return
 			}
+			fmt.Println("from browser",candidate.Candidate)
 		case "answer":
 			answer := webrtc.SessionDescription{}
 			if err := json.Unmarshal([]byte(message.Data), &answer); err != nil {
 				log.Println(err)
 				return
 			}
-
 			if err := peerConnection.SetRemoteDescription(answer); err != nil {
 				log.Println(err)
 				return

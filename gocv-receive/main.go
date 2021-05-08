@@ -42,7 +42,6 @@ func main() {
 			fmt.Println(scanner.Text())
 		}
 	}()
-
 	createWebRTCConn(ffmpegIn)
 	startGoCVMotionDetect(ffmpegOut)
 }
@@ -93,8 +92,9 @@ func startGoCVMotionDetect(ffmpegOut io.Reader) {
 
 		// now find contours
 		contours := gocv.FindContours(imgThresh, gocv.RetrievalExternal, gocv.ChainApproxSimple)
-		for i, c := range contours {
-			area := gocv.ContourArea(c)
+		for i := 0; i < contours.Size(); i++ {
+		//for i, c := range contours {
+			area := gocv.ContourArea(contours.At(i))
 			if area < minimumArea {
 				continue
 			}
@@ -103,7 +103,7 @@ func startGoCVMotionDetect(ffmpegOut io.Reader) {
 			statusColor = color.RGBA{255, 0, 0, 0}
 			gocv.DrawContours(&img, contours, i, statusColor, 2)
 
-			rect := gocv.BoundingRect(c)
+			rect := gocv.BoundingRect(contours.At(i))
 			gocv.Rectangle(&img, rect, color.RGBA{0, 0, 255, 0}, 2)
 		}
 

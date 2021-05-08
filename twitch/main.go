@@ -139,7 +139,7 @@ func main() {
 
 func startFFmpeg(width, height int) {
 	// Create a ffmpeg process that consumes MKV via stdin, and broadcasts out to Twitch
-	ffmpeg := exec.Command("ffmpeg", "-re", "-i", "pipe:0", "-c:v", "libx264", "-preset", "veryfast", "-maxrate", "3000k", "-bufsize", "6000k", "-pix_fmt", "yuv420p", "-g", "50", "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "44100", "-f", "flv", fmt.Sprintf("rtmp://live.twitch.tv/app/%s", streamKey)) //nolint
+	ffmpeg := exec.Command("ffmpeg", "-re", "-i", "pipe:0", "-c:v", "libx264", "-preset", "veryfast", "-threads","8","-maxrate", "3000k", "-bufsize", "6000k", "-pix_fmt", "yuv420p", "-g", "50", "-c:a", "aac", "-b:a", "160k", "-ac", "2", "-ar", "44100", "-f", "flv", fmt.Sprintf("rtmp://localhost:1935/live/%s", streamKey)) //nolint
 	ffmpegIn, _ := ffmpeg.StdinPipe()
 	ffmpegOut, _ := ffmpeg.StderrPipe()
 	if err := ffmpeg.Start(); err != nil {

@@ -1,0 +1,87 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>pion-test</title>
+  </head>
+
+  <body>
+    <button onclick="window.publishVideo(true)"> Publish Video </button>
+    <button onclick="window.publishVideo(false)"> Join a Broadcast </button>
+    <br />
+
+    <h3> Video Stream </h3>
+    <video id="localVideo"  width="200" height="200" autoplay muted></video> <br />
+
+    <h3> Remote Video </h3>
+    <div id="remoteVideos"></div> <br />
+
+    <h3> Logs </h3>
+    <div id="logs"></div>
+  </body>
+
+  <script>
+    var log = msg => {
+      document.getElementById('logs').innerHTML += msg + '<br>'
+    }
+
+    window.publishVideo = (isPublisher) => {
+      let pc = new RTCPeerConnection()
+      if (isPublisher) {
+        navigator.mediaDevices.getUserMedia({video: true, audio: false })
+          .then(stream => {
+
+            stream.getTracks().forEach(track => pc.addTrack(track, stream));
+            document.getElementById('localVideo').srcObject = stream
+            pc.createOffer()
+                    .then(offer => {
+                      pc.setLocalDescription(offer)
+
+                      return fetch(`/signal?publisher=true`, {
+                        method: 'post',
+                        headers: {
+                          'Accept': 'application/json, text/plain, */*',
+                          'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(offer)
+                      })
+                    })
+                    .then(res => res.json())
+                    .then(res => pc.setRemoteDescription(res))
+                    .catch(log)
+          }).catch(log)
+      }else{
+        pc.addTransceiver('video')
+        pc.ontrack = function (event) {
+          console.log(event.track.id,event.streams[0].id,event.track.kind)
+          if (event.track.kind === 'audio') {
+            return
+          }
+          let el = document.createElement(event.track.kind)
+          el.srcObject = event.streams[0]
+          el.autoplay = true
+          el.controls = true
+          document.getElementById('remoteVideos').appendChild(el)
+
+        }
+        pc.createOffer()
+                .then(offer => {
+                  pc.setLocalDescription(offer)
+
+                  return fetch(`/signal?publisher=false`, {
+                    method: 'post',
+                    headers: {
+                      'Accept': 'application/json, text/plain, */*',
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(offer)
+                  })
+                })
+                .then(res => res.json())
+                .then(res => pc.setRemoteDescription(res))
+                .catch(log)
+      }
+
+
+    }
+  </script>
+</html>

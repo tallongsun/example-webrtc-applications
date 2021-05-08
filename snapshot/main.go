@@ -108,6 +108,7 @@ func signaling(w http.ResponseWriter, r *http.Request) {
 }
 
 func snapshot(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("ss start")
 	// Initialized with 20 maxLate, my samples sometimes 10-15 packets
 	sampleBuilder := samplebuilder.New(20, &codecs.VP8Packet{}, 90000)
 	decoder := vp8.NewDecoder()
@@ -124,6 +125,7 @@ func snapshot(w http.ResponseWriter, r *http.Request) {
 
 		// Read VP8 header.
 		videoKeyframe := (sample.Data[0]&0x1 == 0)
+		fmt.Println("ss key frame",videoKeyframe)
 		if !videoKeyframe {
 			continue
 		}
@@ -156,8 +158,10 @@ func snapshot(w http.ResponseWriter, r *http.Request) {
 		if _, err = w.Write(buffer.Bytes()); err != nil {
 			panic(err)
 		}
+		fmt.Println("ss finish")
 		return
 	}
+	fmt.Println("ss stop")
 }
 
 func main() {
