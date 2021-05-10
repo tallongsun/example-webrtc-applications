@@ -1,96 +1,128 @@
-// +build !js
-
 package main
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/pion/rtcp"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
-	"io"
+	"net"
 	"net/http"
-	"os"
 	"time"
 )
 
-const cipherKey = 0xAA
-
+//ffprobe -i rtp-forwarder.sdp -protocol_whitelist file,udp,rtp
+//ffplay -i rtp-forwarder.sdp -protocol_whitelist file,udp,rtp -fflags nobuffer
+//ffmpeg -protocol_whitelist file,udp,rtp -i rtp-forwarder.sdp -c:v libx264 -preset veryfast -b:v 3000k -maxrate 3000k -bufsize 6000k -pix_fmt yuv420p -g 50 -c:a aac -b:a 160k -ac 2 -ar 44100 -f flv rtmp://live.twitch.tv/app/live_679837561_IZ00s439FMb9En2TSdYrzJA6b71Yuz
+//https://www.twitch.tv/tallongsun1
 func main() {
+
 	http.Handle("/", http.FileServer(http.Dir(".")))
 	http.HandleFunc("/signal", signaling)
 	http.ListenAndServe(":8080", nil)
 }
 
+type udpConn struct {
+	conn        *net.UDPConn
+	port        int
+	payloadType uint8
+}
+
 func signaling(w http.ResponseWriter, r *http.Request) {
-
-
 	peerConnection, err := webrtc.NewPeerConnection(webrtc.Configuration{})
 	if err != nil {
 		panic(err)
 	}
 
-	videoTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video", "pion")
-	if err != nil {
-		panic(err)
-	}
-	rtpSender, err := peerConnection.AddTrack(videoTrack)
-	if err != nil {
-		panic(err)
+	udpConns := map[string]*udpConn{
+		"audio": {port: 4000, payloadType: 111},
+		"video": {port: 4002, payloadType: 96},
 	}
 	go func() {
-		rtcpBuf := make([]byte, 1500)
-		for {
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
-				return
-			}
+		ctx, _ := context.WithCancel(context.Background())
+		var laddr *net.UDPAddr
+		if laddr, err = net.ResolveUDPAddr("udp", "127.0.0.1:"); err != nil {
+			panic(err)
 		}
-	}()
+		// Prepare udp conns
+		// Also update incoming packets with expected PayloadType, the browser may use
+		// a different value. We have to modify so our stream matches what rtp-forwarder.sdp expects
+		for _, c := range udpConns {
+			// Create remote addr
+			var raddr *net.UDPAddr
+			if raddr, err = net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%d", c.port)); err != nil {
+				panic(err)
+			}
 
-	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(context.Background())
-	go func() {
-		// Open a IVF file and start reading using our IVFReader
-		file, ivfErr := os.Open("../play-from-disk/output.ivf")
-		if ivfErr != nil {
-			panic(ivfErr)
+			// Dial udp
+			if c.conn, err = net.DialUDP("udp", laddr, raddr); err != nil {
+				panic(err)
+			}
+			defer func(conn net.PacketConn) {
+				if closeErr := conn.Close(); closeErr != nil {
+					panic(closeErr)
+				}
+			}(c.conn)
 		}
-
-		ivf, header, ivfErr := ivfreader.NewWith(file)
-		if ivfErr != nil {
-			panic(ivfErr)
-		}
-
-		// Wait for connection established
-		<-iceConnectedCtx.Done()
-
-		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
-		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
-		sleepTime := time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000)
-		for {
-			frame, _, ivfErr := ivf.ParseNextFrame()
-			if ivfErr == io.EOF {
-				fmt.Printf("All frames parsed and sent")
-				os.Exit(0)
-			}
-
-			if ivfErr != nil {
-				panic(ivfErr)
-			}
-
-			// Encrypt video using XOR Cipher
-			for i := range frame {
-				frame[i] ^= cipherKey
-			}
-
-			time.Sleep(sleepTime)
-			if ivfErr = videoTrack.WriteSample(media.Sample{Data: frame, Duration: time.Second}); ivfErr != nil {
-				panic(ivfErr)
-			}
-		}
+		<-ctx.Done()
 	}()
 
 
+	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		fmt.Println("on track.",track.ID(),track.StreamID(),track.Kind(),track.PayloadType(),track.Codec().MimeType)
+		// Retrieve udp connection
+		c, ok := udpConns[track.Kind().String()]
+		if !ok {
+			return
+		}
+		// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+		// This is a temporary fix until we implement incoming RTCP events, then we would push a PLI only when a viewer requests it
+		go func() {
+			ticker := time.NewTicker(time.Second * 3)
+			for range ticker.C {
+				errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
+				if errSend != nil {
+					fmt.Println(errSend)
+				}
+			}
+		}()
+
+		b := make([]byte, 1500)
+		rtpPacket := &rtp.Packet{}
+		for {
+			// Read
+			n, _, readErr := track.Read(b)
+			if readErr != nil {
+				panic(readErr)
+			}
+
+			// Unmarshal the packet and update the PayloadType
+			if err = rtpPacket.Unmarshal(b[:n]); err != nil {
+				panic(err)
+			}
+			rtpPacket.PayloadType = c.payloadType
+
+			// Marshal into original buffer with updated PayloadType
+			if n, err = rtpPacket.MarshalTo(b); err != nil {
+				panic(err)
+			}
+
+			// Write
+			if _, err = c.conn.Write(b[:n]); err != nil {
+				// For this particular example, third party applications usually timeout after a short
+				// amount of time during which the user doesn't have enough time to provide the answer
+				// to the browser.
+				// That's why, for this particular example, the user first needs to provide the answer
+				// to the browser then open the third party application. Therefore we must not kill
+				// the forward on "connection refused" errors
+				if opError, ok := err.(*net.OpError); ok && opError.Err.Error() == "write: connection refused" {
+					continue
+				}
+				panic(err)
+			}
+		}
+	})
 
 	peerConnection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		fmt.Println("on ice candidate.")
@@ -101,9 +133,6 @@ func signaling(w http.ResponseWriter, r *http.Request) {
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		fmt.Printf("ICE Connection State has changed: %s\n", connectionState.String())
-		if connectionState == webrtc.ICEConnectionStateConnected {
-			iceConnectedCtxCancel()
-		}
 	})
 	peerConnection.OnConnectionStateChange(func(p webrtc.PeerConnectionState) {
 		fmt.Printf("Connection State has changed: %s\n",p.String())
@@ -135,4 +164,6 @@ func signaling(w http.ResponseWriter, r *http.Request) {
 	if _, err := w.Write(response); err != nil {
 		panic(err)
 	}
+
+
 }
