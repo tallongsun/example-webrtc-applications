@@ -1,0 +1,128 @@
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>pion-test</title>
+</head>
+
+<body>
+<button onclick="window.publishVideo()"> Publish Video </button>
+<br />
+<div id="no-support-banner" style="background-color: red">
+    <h1> Browser does not support insertable streams </h1>
+</div>
+Decrypt Video <input type="checkbox" checked="checked" onclick="window.toggleDecryption()"/><br />
+
+<h3> Video Stream </h3>
+<video id="localVideo" autoplay="true" controls="true"></video> <br />
+
+<h3> Remote Video </h3>
+<div id="remoteVideos"></div> <br />
+
+<h3> Logs </h3>
+<div id="logs"></div>
+</body>
+
+<script>
+    var log = msg => {
+        document.getElementById('logs').innerHTML += msg + '<br>'
+    }
+
+    // Shim to support both versions of API
+    function getInsertableStream(transceiver) {
+        let insertableStreams = null
+        if (transceiver.receiver.createEncodedVideoStreams) {
+            insertableStreams = transceiver.receiver.createEncodedVideoStreams()
+        } else if (transceiver.receiver.createEncodedStreams) {
+            insertableStreams = transceiver.receiver.createEncodedStreams()
+        }
+
+        if (!insertableStreams) {
+            insertableStreamsSupported = false
+            updateSupportBanner()
+            throw 'Insertable Streams are not supported'
+        }
+
+        return insertableStreams
+    }
+    let insertableStreamsSupported = true
+    let updateSupportBanner = () => {
+        let el = document.getElementById('no-support-banner')
+        if (insertableStreamsSupported && el) {
+            el.style = 'display: none'
+        }
+    }
+    document.addEventListener('DOMContentLoaded', updateSupportBanner)
+
+    let applyDecryption = true
+    window.toggleDecryption = () => {
+        applyDecryption = !applyDecryption
+    }
+
+    window.publishVideo = () => {
+        navigator.mediaDevices.getUserMedia({video: true, audio: true })
+            .then(stream => {
+                const cipherKey = 0xAA
+
+                let pc = new RTCPeerConnection({encodedInsertableStreams: true, forceEncodedVideoInsertableStreams: true})
+
+                pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
+                pc.onicecandidate = (event) => {
+                    console.log("onicecandidate",event)
+                    if(event.candidate === null){
+                        console.log("sdp ready: "+JSON.stringify(pc.localDescription))
+                    }
+                };
+
+                pc.ontrack = function (event) {
+                    console.log(event.track.id,event.streams[0].id,event.track.kind)
+                    if (event.track.kind === 'audio') {
+                        return
+                    }
+                    let el = document.createElement(event.track.kind)
+                    el.srcObject = event.streams[0]
+                    el.autoplay = true
+                    el.controls = true
+                    document.getElementById('remoteVideos').appendChild(el)
+
+                }
+
+                let transceiver = pc.addTransceiver('video')
+                let receiverStreams = getInsertableStream(transceiver)
+
+                const reader = receiverStreams.readable.getReader()
+                const writer = receiverStreams.writable.getWriter()
+                reader.read().then(function processVideo({ done, value }) {
+                    let decrypted = new DataView(value.data)
+
+                    if (applyDecryption) {
+                        for (let i = 0; i < decrypted.buffer.byteLength; i++) {
+                            decrypted.setInt8(i, decrypted.getInt8(i) ^ cipherKey)
+                        }
+                    }
+
+                    value.data = decrypted.buffer
+                    writer.write(value)
+                    return reader.read().then(processVideo)
+                })
+
+                pc.createOffer()
+                    .then(offer => {
+                        pc.setLocalDescription(offer)
+                        console.log("offer")
+
+                        return fetch(`/signal`, {
+                            method: 'post',
+                            headers: {
+                                'Accept': 'application/json, text/plain, */*',
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(offer)
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(res => {pc.setRemoteDescription(res);console.log("anwser");})
+                    .catch(log)
+            }).catch(log)
+    }
+</script>
+</html>

@@ -98,7 +98,7 @@ func signaling(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println(answer.Type)
+		fmt.Println(answer.Type,string(response))
 		w.Header().Set("Content-Type", "application/json")
 		if _, err := w.Write(response); err != nil {
 			panic(err)

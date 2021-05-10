@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 	"net/http"
+	"time"
 )
 
 func main() {
@@ -20,12 +22,39 @@ func signaling(w http.ResponseWriter, r *http.Request) {
 		panic(err)
 	}
 
+	// Create Track that we send video back to browser on
+	outputTrack, err := webrtc.NewTrackLocalStaticRTP(webrtc.RTPCodecCapability{MimeType: "video/vp8"}, "video", "pion")
+	if err != nil {
+		panic(err)
+	}
+
+	// Add this newly created track to the PeerConnection
+	_, err = peerConnection.AddTrack(outputTrack)
+	if err != nil {
+		panic(err)
+	}
+
 	peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		fmt.Println("on track.",track.ID(),track.StreamID(),track.Kind())
+		fmt.Println("on track.",track.ID(),track.StreamID(),track.Kind(),track.PayloadType(),track.Codec().MimeType)
+		// Send a PLI on an interval so that the publisher is pushing a keyframe every rtcpPLIInterval
+		// This is a temporary fix until we implement incoming RTCP events, then we would push a PLI only when a viewer requests it
+		go func() {
+			ticker := time.NewTicker(time.Second * 3)
+			for range ticker.C {
+				errSend := peerConnection.WriteRTCP([]rtcp.Packet{&rtcp.PictureLossIndication{MediaSSRC: uint32(track.SSRC())}})
+				if errSend != nil {
+					fmt.Println(errSend)
+				}
+			}
+		}()
+
 		for {
-			_, _, readErr := track.ReadRTP()
+			rtp, _, readErr := track.ReadRTP()
 			if readErr != nil {
 				panic(readErr)
+			}
+			if writeErr := outputTrack.WriteRTP(rtp); writeErr != nil {
+				panic(writeErr)
 			}
 
 		}

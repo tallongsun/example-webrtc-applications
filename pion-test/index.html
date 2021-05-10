@@ -28,8 +28,12 @@
         .then(stream => {
           let pc = new RTCPeerConnection()
 
+          pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
           pc.onicecandidate = (event) => {
             console.log("onicecandidate",event)
+            if(event.candidate === null){
+              console.log("sdp ready: "+JSON.stringify(pc.localDescription))
+            }
           };
 
           pc.ontrack = function (event) {
@@ -42,16 +46,6 @@
             el.autoplay = true
             el.controls = true
             document.getElementById('remoteVideos').appendChild(el)
-
-            event.track.onmute = function(event) {
-              el.play()
-            }
-
-            event.streams[0].onremovetrack = ({track}) => {
-              if (el.parentNode) {
-                el.parentNode.removeChild(el)
-              }
-            }
 
           }
 
