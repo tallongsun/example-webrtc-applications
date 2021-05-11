@@ -1,0 +1,97 @@
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>pion-test</title>
+</head>
+
+<body>
+
+Message<br />
+<textarea id="message">This is my DataChannel message!</textarea> <br/>
+
+<br />
+
+Open channels<br />
+<ul id="ul-open"></ul>
+<button onclick="window.createDataChannel()"> Create Data Channel</button> <br />
+
+<br />
+
+Logs<br />
+<div id="logs"></div>
+
+<script>
+  var log = msg => {
+    document.getElementById('logs').innerHTML += msg + '<br>'
+  }
+
+  window.createDataChannel = () => {
+              let pc = new RTCPeerConnection()
+
+              pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
+              pc.onicecandidate = (event) => {
+                console.log("onicecandidate",event)
+                if(event.candidate === null){
+                  console.log("sdp ready: "+JSON.stringify(pc.localDescription))
+                }
+              };
+
+              let fullName = 'foo'
+              let sendChannel = pc.createDataChannel(fullName)
+
+              sendChannel.onopen = () => {
+                log(`${fullName}: has opened`)
+                sendChannel.onmessage = e => log(`${fullName}: '${e.data}'`)
+
+                let ul = document.getElementById('ul-open')
+                let li = document.createElement('li')
+                li.appendChild(document.createTextNode(`${fullName}: `))
+
+                let btnSend = document.createElement('BUTTON')
+                btnSend.appendChild(document.createTextNode('Send message'))
+                btnSend.onclick = () => {
+                  let message = document.getElementById('message').value
+                  if (message === '') {
+                    return alert('Message must not be empty')
+                  }
+
+                  sendChannel.send(message)
+                }
+                li.appendChild(btnSend)
+
+                let btnClose = document.createElement('BUTTON')
+                btnClose.appendChild(document.createTextNode('Close'))
+                btnClose.onclick = () => {
+                  sendChannel.close()
+                  ul.removeChild(li)
+                }
+                li.appendChild(btnClose)
+
+                sendChannel.onclose = () => {
+                  log(`${fullName}: closed.`)
+                  ul.removeChild(li)
+                }
+
+                ul.appendChild(li)
+              }
+
+              pc.createOffer()
+                      .then(offer => {
+                        pc.setLocalDescription(offer)
+                        console.log("offer")
+
+                        return fetch(`/signal`, {
+                          method: 'post',
+                          headers: {
+                            'Accept': 'application/json, text/plain, */*',
+                            'Content-Type': 'application/json'
+                          },
+                          body: JSON.stringify(offer)
+                        })
+                      })
+                      .then(res => res.json())
+                      .then(res => {pc.setRemoteDescription(res);console.log("anwser");})
+                      .catch(log)
+  }
+</script>
+</html>

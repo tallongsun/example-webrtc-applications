@@ -1,0 +1,71 @@
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>pion-test</title>
+  </head>
+
+  <body>
+    <button onclick="window.publishVideo()"> Publish Video </button>
+    <br />
+
+    Message<br />
+    <textarea id="message">This is my DataChannel message!</textarea> <br/>
+    <button onclick="window.sendMessage()">Send Message</button> <br />
+
+    <h3> Logs </h3>
+    <div id="logs"></div>
+  </body>
+
+  <script>
+    var log = msg => {
+      document.getElementById('logs').innerHTML += msg + '<br>'
+    }
+
+    window.publishVideo = () => {
+      navigator.mediaDevices.getUserMedia({video: true, audio: true })
+        .then(stream => {
+          let pc = new RTCPeerConnection()
+
+          pc.oniceconnectionstatechange = e => log(pc.iceConnectionState)
+          pc.onicecandidate = (event) => {
+            console.log("onicecandidate",event)
+            if(event.candidate === null){
+              console.log("sdp ready: "+JSON.stringify(pc.localDescription))
+            }
+          };
+
+          let sendChannel = pc.createDataChannel('foo')
+          sendChannel.onclose = () => console.log('sendChannel has closed')
+          sendChannel.onopen = () => console.log('sendChannel has opened')
+          sendChannel.onmessage = e => log(`Message from DataChannel '${sendChannel.label}' payload '${e.data}'`)
+
+          window.sendMessage = () => {
+            let message = document.getElementById('message').value
+            if (message === '') {
+              return alert('Message must not be empty')
+            }
+
+            sendChannel.send(message)
+          }
+
+          pc.createOffer()
+            .then(offer => {
+              pc.setLocalDescription(offer)
+              console.log("offer")
+
+              return fetch(`/signal`, {
+                method: 'post',
+                headers: {
+                  'Accept': 'application/json, text/plain, */*',
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(offer)
+              })
+            })
+            .then(res => res.json())
+            .then(res => {pc.setRemoteDescription(res);console.log("anwser");})
+            .catch(log)
+        }).catch(log)
+    }
+  </script>
+</html>
